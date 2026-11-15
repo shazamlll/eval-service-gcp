@@ -100,9 +100,11 @@ Local verification on 2026-11-15 (Windows, Python 3.13; Bash via Ubuntu WSL):
 - The built-in synthetic set remains **13/15 passed**, with the default
   gate unchanged at **0.8**.
 - Pytest reports one upstream Starlette/AnyIO deprecation warning.
-- **Not locally verified:** Docker image build or container runtime. Neither
-  Windows nor WSL has a Docker/Podman CLI. The GitHub-hosted container check
-  is added; its first run still needs verification.
+- **Passed on GitHub-hosted Linux:** Docker image build, nonroot runtime,
+  `PORT=9090`, `/health`, and a bodyless `/evaluate`
+  ([verified run](https://github.com/shazamlll/eval-service-gcp/actions/runs/43692320763)).
+  The first run exposed a startup-probe connection reset; readiness now uses
+  bounded polling. Local Windows/WSL still has no Docker/Podman CLI.
 - **Not verified:** Cloud Build, registry permissions, Cloud Run deployment,
   public endpoint, real LLM judge, or real traffic. No cloud resources were
   created and no paid APIs were called.
@@ -112,7 +114,7 @@ Local verification on 2026-11-15 (Windows, Python 3.13; Bash via Ubuntu WSL):
 Deployment and wiring were deliberately left out of this repo. A follow-up
 agent (or a human) still needs to:
 
-1. Verify the GitHub-hosted Docker build and container smoke workflow.
+1. Completed: GitHub-hosted Docker build and container smoke verification.
 2. When cloud deployment is explicitly authorized, choose a GCP project,
    enable Cloud Run, Cloud Build, and Artifact Registry, and create a Docker
    Artifact Registry repository in the chosen region with the required IAM permissions.
