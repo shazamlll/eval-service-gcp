@@ -1,3 +1,8 @@
+import os
+import subprocess
+import sys
+
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -132,3 +137,60 @@ def test_evaluate_empty_answer_scores_zero():
 def test_evaluate_rejects_bad_threshold():
     r = client.post("/evaluate", json={"threshold": 1.5})
     assert r.status_code == 422
+
+
+def test_evaluate_without_body_runs_builtin_set():
+    response = client.post("/evaluate")
+    assert response.status_code == 200
+    assert response.json()["summary"]["total"] == 15
+
+
+@pytest.mark.parametrize("threshold", [-0.01, 1.01, "0.8", True, None])
+def test_threshold_requires_number_in_closed_unit_interval(threshold):
+    assert client.post("/evaluate", json={"threshold": threshold}).status_code == 422
+
+
+@pytest.mark.parametrize("threshold", [0, 1])
+def test_threshold_endpoints_are_inclusive(threshold):
+    response = client.post("/evaluate", json={"threshold": threshold})
+    assert response.status_code == 200
+    assert response.json()["summary"]["verdict"] == ("pass" if threshold == 0 else "fail")
+
+
+def test_threshold_compares_unrounded_pass_rate():
+    response = client.post("/evaluate", json={"threshold": 0.8667})
+    assert response.status_code == 200
+    assert response.json()["summary"]["pass_rate"] == 0.8667
+    assert response.json()["summary"]["verdict"] == "fail"
+
+
+@pytest.mark.parametrize("payload", [
+    {"itmes": []},
+    {"items": [{"question": "Shipping cost?", "answer": "Free"}]},
+    {"items": [{"question": " ", "answer": "Free", "expected": "Free"}]},
+    {"items": [{"question": "Shipping cost?", "answer": "Free", "expected": " "}]},
+    {"items": [{"question": "Shipping cost?", "answer": "Free", "expected": "Free", "extra": 1}]},
+])
+def test_invalid_custom_evaluation_does_not_silently_run(payload):
+    assert client.post("/evaluate", json=payload).status_code == 422
+
+
+@pytest.mark.parametrize("threshold", ["-0.1", "1.1", "nan", "inf", "invalid"])
+def test_invalid_environment_threshold_prevents_startup(threshold):
+    result = subprocess.run(
+        [sys.executable, "-c", "import app.main"],
+        env={**os.environ, "EVAL_PASS_RATE_THRESHOLD": threshold},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+
+
+@pytest.mark.parametrize("value", ["NaN", "Infinity", "-Infinity"])
+def test_nonfinite_json_threshold_returns_validation_error(value):
+    response = TestClient(app, raise_server_exceptions=False).post(
+        "/evaluate", content='{"threshold": ' + value + '}',
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["body", "threshold"]

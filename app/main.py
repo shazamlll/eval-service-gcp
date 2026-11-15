@@ -7,15 +7,22 @@ over caller-supplied {question, answer, expected} items.
 from __future__ import annotations
 
 import os
+from typing import Annotated
 
-from fastapi import FastAPI
-from pydantic import BaseModel, Field
+from fastapi import Body, FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, TypeAdapter
 
 from app.eval_set import BUILTIN_CASES
 from app.judge import case_passes, judge
 
 SERVICE_VERSION = "0.1.0"
-DEFAULT_THRESHOLD = float(os.environ.get("EVAL_PASS_RATE_THRESHOLD", "0.8"))
+Threshold = Annotated[float, Field(ge=0.0, le=1.0, allow_inf_nan=False)]
+DEFAULT_THRESHOLD = TypeAdapter(Threshold).validate_python(
+    os.environ.get("EVAL_PASS_RATE_THRESHOLD", "0.8")
+)
+NonBlankText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)]
 
 app = FastAPI(
     title="eval-service-gcp",
@@ -24,15 +31,26 @@ app = FastAPI(
 )
 
 
+@app.exception_handler(RequestValidationError)
+async def invalid_request(_request: Request, exc: RequestValidationError) -> JSONResponse:
+    # Do not echo raw inputs: NaN/Infinity in them cannot be serialized as JSON.
+    errors = [{key: error[key] for key in ("loc", "msg", "type")} for error in exc.errors()]
+    return JSONResponse(status_code=422, content={"detail": errors})
+
+
 class EvalItem(BaseModel):
-    question: str
+    model_config = ConfigDict(extra="forbid")
+
+    question: NonBlankText
     answer: str
-    expected: str = ""
+    expected: NonBlankText
 
 
 class EvaluateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     items: list[EvalItem] = Field(default_factory=list)
-    threshold: float = Field(default=DEFAULT_THRESHOLD, ge=0.0, le=1.0)
+    threshold: Threshold = Field(default=DEFAULT_THRESHOLD, strict=True)
 
 
 class CaseResult(BaseModel):
@@ -66,7 +84,7 @@ def health() -> dict:
 
 
 @app.post("/evaluate", response_model=EvaluateResponse)
-def evaluate(req: EvaluateRequest) -> EvaluateResponse:
+def evaluate(req: EvaluateRequest = Body(default_factory=EvaluateRequest)) -> EvaluateResponse:
     if req.items:
         cases = [
             {"id": None, "question": it.question, "gold": it.expected, "answer": it.answer}
