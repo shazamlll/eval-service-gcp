@@ -105,29 +105,6 @@ Local verification on 2026-11-15 (Windows, Python 3.13; Bash via Ubuntu WSL):
   ([verified run](https://github.com/shazamlll/eval-service-gcp/actions/runs/43692320763)).
   The first run exposed a startup-probe connection reset; readiness now uses
   bounded polling. Local Windows/WSL still has no Docker/Podman CLI.
-- **Not verified:** Cloud Build, registry permissions, Cloud Run deployment,
-  public endpoint, real LLM judge, or real traffic. No cloud resources were
-  created and no paid APIs were called.
-
-## Remaining work
-
-Deployment and wiring were deliberately left out of this repo. A follow-up
-agent (or a human) still needs to:
-
-1. Completed: GitHub-hosted Docker build and container smoke verification.
-2. When cloud deployment is explicitly authorized, choose a GCP project,
-   enable Cloud Run, Cloud Build, and Artifact Registry, and create a Docker
-   Artifact Registry repository in the chosen region with the required IAM permissions.
-3. Set a **budget alert** before deploying anything. An alert is not a spending cap.
-4. Authenticate, then run `PROJECT_ID=my-project REPOSITORY=demo-images REGION=us-central1 bash deploy.sh`
-   from Bash/WSL. The script uses Artifact Registry (`REGION-docker.pkg.dev`)
-   and builds from its own repository directory. It has only been tested
-   with mocked `gcloud`, never against a cloud account.
-5. Verify `/health` and a bodyless `POST /evaluate` at the deployed URL.
-   The script defaults to **private access**: use an authorized identity token,
-   for example `curl -H "Authorization: Bearer $(gcloud auth print-identity-token)" <service-url>/health`.
-   Set `PUBLIC_ACCESS=true` only when intentionally publishing this unauthenticated demo.
-6. Optionally wire a real LLM judge: add an API key via Cloud Run secrets / env vars and swap the deterministic judge in `app/judge.py` for a model-backed one — keeping the same response shape so the gate logic does not change.
 
 ## Honest limits
 
