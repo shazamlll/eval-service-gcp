@@ -32,14 +32,25 @@ jobs:
         run: |
           docker run -d --name eval-service-smoke -e PORT=9090 -p 127.0.0.1:18080:9090 eval-service-gcp:verify
           test "$(docker exec eval-service-smoke id -u)" != 0
-          curl --fail --retry 20 --retry-connrefused --retry-delay 1 http://127.0.0.1:18080/health
           python - <<'PY'
           import json
+          import time
           from urllib.request import Request, urlopen
 
           base = "http://127.0.0.1:18080"
-          with urlopen(base + "/health", timeout=5) as response:
-              assert json.load(response) == {"status": "ok"}
+          # Docker can accept a connection before Uvicorn starts, then reset it.
+          # Poll readiness with a bounded deadline for both refusal and reset.
+          deadline = time.monotonic() + 30
+          while True:
+              try:
+                  with urlopen(base + "/health", timeout=2) as response:
+                      health = json.load(response)
+                  break
+              except OSError:
+                  if time.monotonic() >= deadline:
+                      raise
+                  time.sleep(0.25)
+          assert health == {"status": "ok"}
           with urlopen(Request(base + "/evaluate", method="POST"), timeout=5) as response:
               summary = json.load(response)["summary"]
               assert summary["total"] == 15
