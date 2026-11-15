@@ -1,0 +1,64 @@
+name: verify
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Unit and local HTTP tests
+        run: |
+          python -m pytest -q
+          python tests/smoke_http.py
+          bash -n deploy.sh
+          bash tests/test_deploy.sh
+      - name: Build container
+        run: docker build -t eval-service-gcp:verify .
+      - name: Run container on a nondefault PORT
+        run: |
+          docker run -d --name eval-service-smoke -e PORT=9090 -p 127.0.0.1:18080:9090 eval-service-gcp:verify
+          test "$(docker exec eval-service-smoke id -u)" != 0
+          python - <<'PY'
+          import json
+          import time
+          from urllib.request import Request, urlopen
+
+          base = "http://127.0.0.1:18080"
+          # Docker can accept a connection before Uvicorn starts, then reset it.
+          # Poll readiness with a bounded deadline for both refusal and reset.
+          deadline = time.monotonic() + 30
+          while True:
+              try:
+                  with urlopen(base + "/health", timeout=2) as response:
+                      health = json.load(response)
+                  break
+              except OSError:
+                  if time.monotonic() >= deadline:
+                      raise
+                  time.sleep(0.25)
+          assert health == {"status": "ok"}
+          with urlopen(Request(base + "/evaluate", method="POST"), timeout=5) as response:
+              summary = json.load(response)["summary"]
+              assert summary["total"] == 15
+              assert summary["passed"] == 13 and summary["failed"] == 2
+              assert summary["verdict"] == "pass"
+          PY
+      - name: Container logs and cleanup
+        if: always()
+        run: |
+          docker logs eval-service-smoke 2>&1 || true
+          docker rm -f eval-service-smoke 2>/dev/null || true

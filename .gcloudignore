@@ -1,0 +1,6 @@
+# Upload only the files needed by the Docker build.
+*
+!Dockerfile
+!requirements.txt
+!app/
+!app/**

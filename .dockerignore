@@ -9,3 +9,5 @@ venv
 README.md
 deploy.sh
 tests
+.env
+.env.*
